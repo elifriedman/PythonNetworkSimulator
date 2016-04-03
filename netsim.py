@@ -60,7 +60,6 @@ class Node:
     self.links = []
     self.linkmap = {}
     self.env = env
-    self.buffer = simpy.Store(env)
 
   def addLink(self,link):
     self.links.append(link)
@@ -85,19 +84,15 @@ class Router(Node):
   def dataDelivery(self,packet):
     dest = packet.header['dest']
     if dest in self.routingtable:
-      link = self.routingtable[dest]
-      othernode = link.getOtherNode(self).name
 #      print "%s received %d. Forwarding to %s. Dest: %s" % (self.name,packet.header['index'],othernode,dest)
       self.routingtable[dest].sendData(packet,self)
 
 class Host(Node):
   def __init__(self,name,env):
     Node.__init__(self,name,env)
-    self.data = simpy.Store(env)
 
   def dataDelivery(self,packet):
-    # flow will be alerted that we've received a packet
-    self.data.put(packet)
+    packet.flow.dataDelivery(packet,self)
 
 class Link:
   def __init__(self,node1,node2,name,bufsz,linkrate,propdelay,env):
@@ -152,11 +147,23 @@ class Link:
       link_otherNode.dataDelivery(link_packet)
 
 class Packet:
-  def __init__(self,pktsize,data=[],header=[],loginfo=[]):
+  def __init__(self,pktsize,flow,data=[],loginfo=[]):
     self.pktsize = pktsize
+    self.flow = flow
     self.data = data
-    self.header = header
     self.loginfo = loginfo
+    self.header = self.setHeader()
+
+  def setHeader(self,src="",dest="",seq=-1,ack=-1):
+    self.header = {'src':src,'dest':dest,'seq':seq,'ack':ack}
+  def getSrc(self):
+    return self.header['src']
+  def getDest(self):
+    return self.header['dest']
+  def getSeqNum(self):
+    return self.header['seq']
+  def getAckNum(self):
+    return self.header['ack']
 
   def __len__(self):
     return self.pktsize
@@ -165,13 +172,21 @@ class Flow:
   def __init__(self,name, src, dest, KBamount, start,env):
     self.name = name
     self.src = src
+    self.srcdata = simpy.Store(env)
     self.dest = dest
+    self.destdata = simpy.Store(env)
     self.data = KBamount*1024 # bytes
     self.sentpackets = []
     self.start = start
     self.env = env
     self.action = env.process(self.runSrc())
     self.action = env.process(self.runDest())
+
+  def dataDelivery(self,packet,delivering_node):
+    if delivering_node == self.src:
+      self.srcdata.put(packet)
+    elif delivering_node == self.dest:
+      self.destdata.put(packet)
 
   def runSrc(self):
     yield self.env.timeout(self.start)
@@ -182,33 +197,32 @@ class Flow:
       size = pktsize
       if self.data < pktsize:
         size = self.data
-      header = {}
-      header['index'] = i
-      header['src'] = self.src.name
-      header['dest'] = self.dest.name
-      packet = Packet(size+len(header),header=header,loginfo=[self.env.now])
-      self.sentpackets.append(packet)
+
+      packet = Packet(size,self,loginfo=[self.env.now])
+      packet.setHeader(src=self.src.name,
+                       dest=self.dest.name,
+                       seq=i)
+
       self.data -= len(packet)
       i += 1
       self.src.links[0].sendData(packet,self.src)
-      ack = yield self.src.data.get()
-      print "packet %d took %f seconds" % (ack.header['index'],self.env.now-ack.loginfo[0])
+      ack = yield self.srcdata.get()
+      print "packet %d took %f seconds" % (ack.getSeqNum(),self.env.now-ack.loginfo[0])
 
   def runDest(self):
     i = random.randint(0,100)
     while True:
-      packet = yield self.dest.data.get()
-      respheader = {}
-      respheader['index']=i
-      respheader['src'] = self.dest.name
-      respheader['dest'] = self.src.name
-      respheader['respindex'] = packet.header['index']
+      packet = yield self.destdata.get()
+      resp = Packet(64,self,loginfo=packet.loginfo)
+      resp.setHeader(src=self.dest.name,
+                     dest=self.src.name,
+                     seq=i,
+                     ack=packet.getSeqNum())
       i += 1
-      resp = Packet(max(len(respheader),64),header=respheader,loginfo=packet.loginfo)
       self.dest.links[0].sendData(resp,self.dest)
 
 
 s = Sim('Test2/netfile.csv',
 'Test2/flowfile.csv',
 'Test2/routingtable.csv')
-s.env.run(until=20)
+s.env.run(until=5)
