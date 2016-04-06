@@ -1,6 +1,2 @@
 # flow name, node_src, node_dest, data amount (kB), flow start (s)
 F1,H1,H2,20480,0.5
-F2,H2,H1,20480,0.5
-#F3,H1,H2,20480,0.7
-#F4,H2,H1,20480,0.8
-#5,H1,H2,20480,0.9

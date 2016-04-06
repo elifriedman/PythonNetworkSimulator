@@ -82,7 +82,7 @@ class Router(Node):
       raise Exception(errstr)
 
   def dataDelivery(self,packet):
-    dest = packet.header['dest']
+    dest = packet.getDest()
     if dest in self.routingtable:
 #      print "%s received %d. Forwarding to %s. Dest: %s" % (self.name,packet.header['index'],othernode,dest)
       self.routingtable[dest].sendData(packet,self)
@@ -122,10 +122,11 @@ class Link:
     elif self.bufdata + len(packet) <= self.bufsz:
       self.buffer.append((packet,self.getOtherNode(fromNode)))
       self.bufdata += len(packet)
+#      print "%s: %d" % (self.name,self.bufdata)
 #      print "Packet %s on buffer at time %f, bufsize: %d " % (str(packet.header),self.env.now,self.bufdata)
     else:
+      print "%f: %s dropped packet %d,%d" % (self.env.now,self.name,packet.getSeqNum(),packet.getAckNum())
       pass
-#      print "Packed %s dropped at time %f" % (str(packet.header), self.env.now)
 
   def linkDelay(self,datasize):
     return datasize/self.linkrate
@@ -152,18 +153,22 @@ class Packet:
     self.flow = flow
     self.data = data
     self.loginfo = loginfo
-    self.header = self.setHeader()
+    self.setHeader()
 
-  def setHeader(self,src="",dest="",seq=-1,ack=-1):
-    self.header = {'src':src,'dest':dest,'seq':seq,'ack':ack}
+  def setHeader(self,src="",dest="",seq=-1,ack=-1,isack=False):
+    self.header = {'src':src,'dest':dest,
+                   'seqnum':seq,'acknum':ack,
+                   'isack':isack}
   def getSrc(self):
     return self.header['src']
   def getDest(self):
     return self.header['dest']
   def getSeqNum(self):
-    return self.header['seq']
+    return self.header['seqnum']
   def getAckNum(self):
-    return self.header['ack']
+    return self.header['acknum']
+  def isAck(self):
+    return self.header['isack']
 
   def __len__(self):
     return self.pktsize
@@ -176,11 +181,23 @@ class Flow:
     self.dest = dest
     self.destdata = simpy.Store(env)
     self.data = KBamount*1024 # bytes
-    self.sentpackets = []
     self.start = start
     self.env = env
-    self.action = env.process(self.runSrc())
-    self.action = env.process(self.runDest())
+    self.actionSrc = env.process(self.runSrc())
+    self.actionDest = env.process(self.runDest())
+
+    # TCP variables
+    self.cwnd = 1.0
+    self.cwndinc = 1.0
+    self.ssthresh = 180
+    self.ackCounter = 0
+    self.sentpackets = []
+    self.rttracker = [0,0]
+    self.estRTT = 0.08
+    self.devRTT = 0.0001
+
+  def timeoutInterval(self):
+    return self.estRTT + 4*self.devRTT+1E-6
 
   def dataDelivery(self,packet,delivering_node):
     if delivering_node == self.src:
@@ -190,39 +207,120 @@ class Flow:
 
   def runSrc(self):
     yield self.env.timeout(self.start)
-    print "%s started at %f" % (self.name,self.env.now)
+#    print "%s started at %f" % (self.name,self.env.now)
     pktsize = 1024
-    i = random.randint(0,100)
+    seqnum = 0; random.randint(0,100)
+    self.rttracker[0] = seqnum
+    self.rttracker[1] = self.env.now
     while self.data > 0:
-      size = pktsize
-      if self.data < pktsize:
-        size = self.data
 
-      packet = Packet(size,self,loginfo=[self.env.now])
-      packet.setHeader(src=self.src.name,
-                       dest=self.dest.name,
-                       seq=i)
+      for i in range(int(self.cwnd-len(self.sentpackets))):
+        size = pktsize
+        if self.data < pktsize:
+          size = self.data
+        packet = Packet(size,self,loginfo=[self.env.now])
+        packet.setHeader(src=self.src.name,
+                         dest=self.dest.name,
+                         seq=seqnum)
+        self.sentpackets.append(packet)
+        seqnum += 1
+        self.data -= len(packet)
+        self.src.links[0].sendData(packet,self.src)
 
-      self.data -= len(packet)
-      i += 1
-      self.src.links[0].sendData(packet,self.src)
-      ack = yield self.srcdata.get()
-      print "packet %d took %f seconds" % (ack.getSeqNum(),self.env.now-ack.loginfo[0])
+      def fn():
+        pkt = self.sentpackets[0]
+        timeout = self.env.timeout(self.timeoutInterval())
+        yield timeout
+        if pkt in self.sentpackets:
+          self.actionSrc.interrupt()
+      self.env.process(fn())
+      try:
+        ackpkt = yield self.srcdata.get()
+
+#        sampleRTT = self.env.now-self.rttracker[1]
+#        self.estRTT = 0.875*self.estRTT + 0.125*sampleRTT
+#        self.devRTT = 0.75*self.devRTT + 0.25*abs(sampleRTT-self.estRTT)
+        while len(self.sentpackets) > 0 and \
+              ackpkt.getAckNum() >= self.sentpackets[0].getSeqNum():
+          self.ackCounter = 0
+          self.sentpackets.pop(0)
+#        if ackpkt.getAckNum() >= self.rttracker[0]:
+#          sampleRTT = self.env.now - self.rttracker[1]
+#          print "Updating %d with RTT %f, %f" % (ackpkt.getAckNum(),sampleRTT,self.timeoutInterval())
+#          self.estRTT = 0.875*self.estRTT + 0.125*sampleRTT
+#          self.devRTT = 0.75*self.devRTT + 0.25*abs(sampleRTT-self.estRTT)
+#          self.rttracker[0] = seqnum
+#          if ackpkt.getAckNum()==self.rttracker[0]:
+#            self.rttracker[0] += 1
+#          self.rttracker[1] = self.env.now
+
+        if len(self.sentpackets) > 0 and \
+              ackpkt.getAckNum()+1 == self.sentpackets[0].getSeqNum():
+          self.ackCounter += 1
+        print "CWND,%f,%d" % (self.env.now,self.cwnd)
+        print "%f: packet %d (%f,%d,%d)" % (self.env.now,ackpkt.getAckNum(),self.timeoutInterval(),self.cwnd,len(self.sentpackets))
+
+#        print "%f: packet %d took %f seconds (%f,%d,%d)" % (self.env.now,ackpkt.getAckNum(),sampleRTT,self.timeoutInterval(),self.cwnd,len(self.sentpackets))
+        if self.ackCounter == 4:
+          print "Resending %d" % self.sentpackets[0].getSeqNum()
+          self.ackCounter = 0
+          self.ssthresh = self.cwnd / 2
+          self.cwnd = 0
+          pkt = self.sentpackets[0]
+          self.rttracker[0] = -1
+          self.src.links[0].sendData(pkt,self.src)
+
+        if self.cwnd >= self.ssthresh:
+          self.cwndinc = 5.5/self.cwnd
+        else:
+          self.cwndinc = 1.0
+
+        self.cwnd += self.cwndinc
+      except simpy.Interrupt:
+        self.ackCounter = 0
+        self.cwnd = 1
+        if len(self.sentpackets) > 0:
+          pkt = self.sentpackets[0]
+          self.rttracker[0] = -1
+          print "%f: Timeout. Sent %d" % (self.env.now,pkt.getSeqNum())
+          self.src.links[0].sendData(pkt,self.src)
+        self.srcdata = simpy.Store(self.env)
 
   def runDest(self):
-    i = random.randint(0,100)
+    seqnum = random.randint(0,100)
+    self.nextAck = -1
+    self.unacked = []
     while True:
       packet = yield self.destdata.get()
+      print "%f: Received %d,%d" % (self.env.now,packet.getSeqNum(),self.nextAck)
       resp = Packet(64,self,loginfo=packet.loginfo)
-      resp.setHeader(src=self.dest.name,
-                     dest=self.src.name,
-                     seq=i,
-                     ack=packet.getSeqNum())
-      i += 1
-      self.dest.links[0].sendData(resp,self.dest)
+      if self.nextAck == -1:
+        self.nextAck = packet.getSeqNum()
+      if self.nextAck < packet.getSeqNum():
+        futurepkt = Packet(64,self,loginfo=packet.loginfo)
+        futurepkt.setHeader(src=self.dest.name,
+                           dest=self.src.name,
+                           seq=-1,
+                           ack=packet.getSeqNum())
+        self.unacked.append(futurepkt)
+
+        resp.setHeader(src=self.dest.name, dest=self.src.name,
+                       seq=seqnum, ack=self.nextAck-1)
+#        print "%f: Responding with %d" % (self.env.now,resp.getAckNum())
+        self.dest.links[0].sendData(resp,self.dest)
+      elif self.nextAck == packet.getSeqNum():
+        resp.setHeader(src=self.dest.name, dest=self.src.name,
+                      seq=seqnum, ack=packet.getSeqNum())
+        self.unacked.append(resp)
+        self.unacked.sort(key=lambda pkt: pkt.getAckNum())
+        while len(self.unacked)>0 and self.nextAck == self.unacked[0].getAckNum():
+          resp = self.unacked.pop(0)
+          self.nextAck = resp.getAckNum()+1
+#        print "%f: Responding with %d" % (self.env.now,resp.getAckNum())
+        self.dest.links[0].sendData(resp,self.dest)
 
 
 s = Sim('Test2/netfile.csv',
 'Test2/flowfile.csv',
 'Test2/routingtable.csv')
-s.env.run(until=5)
+s.env.run(until=250)
