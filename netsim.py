@@ -66,6 +66,6 @@ class Sim:
 
 
 
-s = Sim('Test3/netfile.csv',
-'Test3/flowfile.csv')
+s = Sim('Test2/netfile.csv',
+'Test2/flowfile.csv')
 s.env.run(until=250)
