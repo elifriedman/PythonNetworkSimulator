@@ -1,0 +1,9 @@
+# dest, node, outgoing link
+H1,R1,L0
+H1,R2,L1
+H1,R3,L2
+H1,R4,L4
+H2,R1,L1
+H2,R2,L3
+H2,R3,L4
+H2,R4,L5

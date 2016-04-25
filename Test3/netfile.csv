@@ -1,0 +1,10 @@
+#linkname, node1, node2, link rate (Mbps), Link delay (ms), Link buffer (kb)
+L1,R1,R2,10,10,64
+L2,R2,R3,10,10,64
+L3,R3,R4,10,10,64
+La,S1,R1,12.5,10,128
+Lb,S2,R1,12.5,10,128
+Lc,T2,R2,12.5,10,128
+Ld,S3,R3,12.5,10,128
+Le,T3,R4,12.5,10,128
+Lf,T1,R4,12.5,10,128

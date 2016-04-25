@@ -1,2 +1,2 @@
-# flow name, node_src, node_dest, data amount (kB), flow start (s)
-F1,H1,H2,20480,1.0
+# flow name, node_src, node_dest, data amount (kB), flow start (s), tcptype ('TAHOE' or 'RENO')
+F1,H1,H2,20480,1.0,TAHOE
