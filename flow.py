@@ -45,6 +45,12 @@ class Flow:
     self.estRTT = 0.08
     self.devRTT = 0.0001
 
+    # measurement variables
+    self.nextMeas = 1.0
+    self.lastMeas = 0.0
+    self.dataSent = 0.0
+    self.flowrate = 0.0
+
   def timeoutInterval(self):
     return self.estRTT + 4*self.devRTT+1E-6
 
@@ -55,14 +61,20 @@ class Flow:
       self.destdata.put(packet)
 
   def runSrc(self):
+    """ Runs all the logic for the source node of the flow.
+    This function waits until the user specified for this flow to start and
+    then loops until we have no more data, creating events, sending data to
+    the destination, and receiving acks from the destination. This function
+    can run two versions of TCP--Tahoe and Reno.
+    """
     yield self.env.timeout(self.start)
-#    print "%s started at %f" % (self.name,self.env.now)
-    pktsize = 1024
-    seqnum = 0; random.randint(0,100)
-    self.rttracker[0] = seqnum
-    self.rttracker[1] = self.env.now
-    while self.data > 0:
+    self.lastMeas = self.env.now
+    self.nextMeas = self.env.now + 1.0
 
+    pktsize = 1024
+    seqnum = 0
+    while self.data > 0:
+      # send as many packets as cwnd will let us
       for i in range(int(self.cwnd-len(self.sentpackets))):
         size = pktsize
         if self.data < pktsize:
@@ -74,6 +86,7 @@ class Flow:
         self.sentpackets.append(packet)
         seqnum += 1
         self.data -= len(packet)
+        self.dataSent += len(packet)
         self.src.links[0].sendData(packet,self.src)
 
       def timeoutfn():
@@ -87,9 +100,7 @@ class Flow:
           self.actionSrc.interrupt()
       self.env.process(timeoutfn())
       try:
-        ackpkt = yield self.srcdata.get()
-
-
+        ackpkt = yield self.srcdata.get() # wait for a packet to arrive
 
         firstack = False
         # remove packets from list, since they were acked
@@ -111,6 +122,7 @@ class Flow:
               ackpkt.getAckNum()+1 == self.sentpackets[0].getSeqNum():
           dupack = True
 
+        # state machine for TCP Tahoe and Reno
         if self.state == SS or self.state == CA:
           if self.state == SS: cwndinc = 1.0
           elif self.state == CA: cwndinc = 15.5 / self.cwnd
@@ -122,7 +134,7 @@ class Flow:
           if self.cwnd >= self.ssthresh: # SS -> CA
             self.state = CA
           if self.ackCounter > 3:
-            print "TRIPACK,%f,%d" % (self.env.now,ackpkt.getAckNum())
+            print "TRIPACK,%f,%s,%d" % (self.env.now,self.name,ackpkt.getAckNum())
             self.ssthresh = self.cwnd/2
             if self.tcptype == 'tahoe':
               self.cwnd = 1
@@ -139,13 +151,22 @@ class Flow:
             self.ackCounter = 0
             self.state = CA
           elif dupack:
-            self.cwnd += 0.5
+            self.cwnd += 1.0
             # don't retransmit?
+        if self.env.now > self.nextMeas:
+          time = self.env.now - self.lastMeas
+          self.flowrate = self.dataSent / time
+          self.dataSent = 0.0
+          self.lastMeas = self.env.now
+          self.nextMeas = self.env.now + 1.0
 
-        print "CWND,%f,%s,%d,%d,%s" % (self.env.now,self.name, self.cwnd,self.data,state2str(self.state))
+        print "FLOW,%f,%s,%d,%d,%f,%f,%s" % (self.env.now,self.name,
+                                             self.cwnd,self.data,
+                                             self.estRTT,self.flowrate,
+                                             state2str(self.state))
 
       except simpy.Interrupt: # TIMEOUT!
-        print "TIME,%f,%d" % (self.env.now,self.sentpackets[0].getSeqNum())
+        print "TIME,%f,%s,%d" % (self.env.now,self.name,self.sentpackets[0].getSeqNum())
         self.ssthresh = self.cwnd/2
         self.cwnd = 1
         self.ackCounter = 0

@@ -7,6 +7,9 @@ from link import *
 from flow import *
 
 class Sim:
+  """ A class for reading and loading the configuration files, and initializing
+  everything.
+  """
   def __init__(self,netfilename,flowfilename,routingfilename=None):
     self.env = simpy.Environment()
     self.nodes = self.getNodes(netfilename)
@@ -61,11 +64,14 @@ class Sim:
       nodes[n2].addLink(l)
     return nodes
 
-
-
-
-
-
-s = Sim('Test2/netfile.csv',
-'Test2/flowfile.csv')
-s.env.run(until=250)
+import sys
+if __name__=='__main__':
+  if len(sys.argv) < 3:
+    print "usage: python netsim.py Folder time"
+    sys.exit(0)
+  folder = sys.argv[1]+'/'
+  netfile = folder+'netfile.csv'
+  flowfile = folder+'flowfile.csv'
+  time = float(sys.argv[2])
+  s = Sim(netfile,flowfile)
+  s.env.run(until=time)

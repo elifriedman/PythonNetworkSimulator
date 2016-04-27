@@ -32,30 +32,32 @@ class Link:
       self.buffer.append((packet,self.getOtherNode(fromNode)))
       self.bufdata += len(packet)
     else:
+      print "DROP,%f,%s,%s->%s" % (self.env.now,self.name,packet.getSrc(),packet.getDest())
       pass
 
   def linkDelay(self,datasize):
     return datasize/self.linkrate
 
   def cost(self):
-    return 1.0/self.linkrate #self.bufdata/self.linkrate + 1# use hopcount as cost
+    return 1.0 + self.bufdata/self.linkrate # use hopcount as cost
 
   def run(self):
     while True:
-      link_packet,link_otherNode = yield self.link.get()
+      link_packet,link_otherNode = yield self.link.get() # wait for data
       yield self.env.timeout(self.linkDelay(len(link_packet)))
       self.linkoccpuied = False
       if self.bufdata > 0:
         packet,otherNode = self.buffer.pop(0)
         self.bufdata -= len(packet)
         self.linkoccpuied = True
-#        print "Packet %s on link from buf at time %f, bufsize: %d" % (str(packet.header),self.env.now,self.bufdata)
+
         self.link.put((packet,otherNode))
 
+      # data travelling to other end of link
       yield self.env.timeout(self.propdelay)
-#      print "Packet %s off link at time %f" % (str(link_packet.header),self.env.now)
+
       link_otherNode.dataDelivery(link_packet)
-      print "BUF,%f,%s,%d,%d" % (self.env.now,self.name,self.bufdata,len(self.buffer))
+      print "BUF,%f,%s,%d,%d,%s->%s" % (self.env.now,self.name,self.bufdata,len(self.buffer),link_packet.getSrc(),link_packet.getDest())
 
 class Packet:
   def __init__(self,pktsize,flow,data=[],loginfo=[]):
@@ -64,6 +66,7 @@ class Packet:
     self.data = data
     self.loginfo = loginfo
     self.setHeader()
+    self.hopcount = 10
 
   def setHeader(self,src="",dest="",seq=-1,ack=-1,isack=False):
     self.header = {'src':src,'dest':dest,

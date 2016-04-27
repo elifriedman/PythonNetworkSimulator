@@ -44,7 +44,8 @@ class Router(Node):
     dest = packet.getDest()
     if dest == self.name: # it's a distance vector update
       self.distance_vecs[packet.getSrc()] = packet.data
-    elif dest in self.routingtable:
+    elif dest in self.routingtable and packet.hopcount > 0:
+      packet.hopcount -= 1
       self.routingtable[dest].sendData(packet,self)
     self.updateDVRouting()
 
@@ -63,26 +64,18 @@ class Router(Node):
            Send an update to our neighbors regardless of whether the dvec changes.
            (Useful when initializing the Distance Vector algorithm)
     """
-#    print "dvec"
-    dvec = self.distance_vecs[self.name]
+    dvec = self.distance_vecs[self.name] # my distance vector
     changed = False
     for node in dvec:
       if node==self.name: continue
       mini = inf
       minlink = None
-      changedSub = False
       for link in self.links:
         nb_name = link.getOtherNode(self).name
-        if dvec[nb_name] != link.cost(): # send dvec if neighbor cost changed
-          dvec[nb_name] = link.cost()
-          changed = True
-
-        if isinstance(link.getOtherNode(self),Router):
-          if link.cost() + self.distance_vecs[nb_name][node] < mini:
-            mini = link.cost() + self.distance_vecs[nb_name][node]
-            minlink = link
-            changedSub = True
-      if changedSub and mini < dvec[node]:
+        if link.cost() + self.distance_vecs[nb_name][node] < mini:
+          mini = link.cost() + self.distance_vecs[nb_name][node]
+          minlink = link
+      if mini != dvec[node]:
         changed = True
         dvec[node] = mini
         self.routingtable[node] = minlink
@@ -90,7 +83,7 @@ class Router(Node):
       # Now send my distance vec to my neighbors
       for link in self.links:
         if isinstance(link.getOtherNode(self),Router):
-          pkt = Packet(64,None,data=self.distance_vecs[self.name])
+          pkt = Packet(0,None,data=self.distance_vecs[self.name])
           pkt.setHeader(src=self.name,dest=link.getOtherNode(self).name)
           link.sendData(pkt,self)
 #      print self.name,':'
@@ -114,8 +107,8 @@ class Router(Node):
       nb_name = neighbor.name
       self.distance_vecs[self.name][nb_name] = link.cost() # update my dvec
       self.routingtable[nb_name] = link
-      if isinstance(neighbor,Router):  # we only need dvecs of routers
-        self.distance_vecs[nb_name] = dvec.copy() # initialize to inf
+      self.distance_vecs[nb_name] = dvec.copy() # initialize to inf
+      self.distance_vecs[nb_name][nb_name] = 0 # set self cost to 0
     self.distance_vecs[self.name][self.name] = 0 # 0 cost to myself
     self.updateDVRouting(send=True)
 

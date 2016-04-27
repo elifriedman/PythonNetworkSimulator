@@ -1,4 +1,4 @@
 # flow name, node_src, node_dest, data amount (kB), flow start (s), tcptype ('TAHOE' or 'RENO')
-F1,S1,T1,35840,0.5,Tahoe
-F2,S2,T2,15160,10,Tahoe
-F3,S3,T3,30720,20,Tahoe
+F1,S1,T1,35840,0.5,tahoe
+F2,S2,T2,15160,10,tahoe
+F3,S3,T3,30720,20,tahoe
