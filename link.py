@@ -39,7 +39,7 @@ class Link:
     return datasize/self.linkrate
 
   def cost(self):
-    return 1.0 + self.bufdata/self.linkrate # use hopcount as cost
+    return 1.0 # + self.bufdata/self.linkrate # use hopcount as cost
 
   def run(self):
     while True:

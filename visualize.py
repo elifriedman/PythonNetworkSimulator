@@ -35,11 +35,13 @@ def visbuf(logfile):
       links[name][2].append(buflen)
   return links
 
-links = visbuf('test2_reno2.log')
+sname = 'test2_reno.log'
+
+links = visbuf(sname)
 for link in links:
   links[link] = np.array(links[link])
 
-flows = viscwn('test2_reno2.log')
+flows = viscwn(sname)
 for flow in flows:
   flows[flow] = np.array(flows[flow])
 
@@ -51,7 +53,7 @@ def plotlink(nm,j,ylabel='Buffer data (bytes)'):
         plt.plot(links[n][i],links[n][j],label=n)
       plt.legend()
   else:
-    plt.plot(links[n][i],links[n][j])
+    plt.plot(links[nm][i],links[nm][j])
   plt.xlabel('time (s)')
   plt.ylabel(ylabel)
 
@@ -92,3 +94,15 @@ def plotflow(nm,j,ylabel='Congestion Window Size',state=False):
   plt.show()
 
 
+# 1 : congestion window
+# 2 : data left to send
+# 3 : round trip time
+# 4 : throughput
+whattoplot = 1
+plotflow(['F1','F2','F3'],whattoplot)
+
+plt.figure()
+# 1 : amount of data in buffer
+# 2 : # packets in the buffer
+whattoplot = 1
+plotlink(['L1','L2'],whattoplot)
